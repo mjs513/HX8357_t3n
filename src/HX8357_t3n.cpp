@@ -67,6 +67,7 @@
 DMASetting 	HX8357_t3n::_dmasettings[4];
 DMAChannel 	HX8357_t3n::_dmatx;
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
+// Settings are part of the actual object not static... 
 //DMASetting 	HX8357_t3n::_dmasettings[4];
 //DMAChannel 	HX8357_t3n::_dmatx;
 #else
@@ -141,10 +142,39 @@ void HX8357_t3n::process_dma_interrupt(void) {
 	}
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
 	// T4
+	#if defined(TRY_FULL_DMA_CHAIN)
+	_dma_frame_count++;
+	_dmatx.clearInterrupt();
 
+	// See if we are in continuous mode or not..
+	if ((_dma_state & HX8357_DMA_CONT) == 0) {
+		// We are in single refresh mode or the user has called cancel so
+		// Lets try to release the CS pin
+		//Serial.printf("Before FSR wait: %x %x\n", _pimxrt_spi->FSR, _pimxrt_spi->SR);
+		while (_pimxrt_spi->FSR & 0x1f)  ;	// wait until this one is complete
+
+		//Serial.printf("Before SR busy wait: %x\n", _pimxrt_spi->SR);
+		while (_pimxrt_spi->SR & LPSPI_SR_MBF)  ;	// wait until this one is complete
+
+		_dmatx.clearComplete();
+		//Serial.println("Restore FCR");
+		_pimxrt_spi->FCR = LPSPI_FCR_TXWATER(15); // _spi_fcr_save;	// restore the FSR status... 
+ 		_pimxrt_spi->DER = 0;		// DMA no longer doing TX (or RX)
+
+		_pimxrt_spi->CR = LPSPI_CR_MEN | LPSPI_CR_RRF | LPSPI_CR_RTF;   // actually clear both...
+		_pimxrt_spi->SR = 0x3f00;	// clear out all of the other status...
+
+		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));	// output Command with 8 bits
+		// Serial.printf("Output NOP (SR %x CR %x FSR %x FCR %x %x TCR:%x)\n", _pimxrt_spi->SR, _pimxrt_spi->CR, _pimxrt_spi->FSR, 
+		//	_pimxrt_spi->FCR, _spi_fcr_save, _pimxrt_spi->TCR);
+		writecommand_last(HX8357_NOP);
+		_dma_state &= ~HX8357_DMA_ACTIVE;
+		_dmaActiveDisplay[_spi_num]  = 0;	// We don't have a display active any more... 
+	}
+	#else
 	bool still_more_dma = true;
 	_dma_sub_frame_count++;
-//	Serial.print(".");
+	//	Serial.print(".");
 	if (_dma_sub_frame_count == _dma_cnt_sub_frames_per_frame) {
 	#ifdef DEBUG_ASYNC_LEDS
 		digitalWriteFast(DEBUG_PIN_3, HIGH);
@@ -216,6 +246,7 @@ void HX8357_t3n::process_dma_interrupt(void) {
 	}
 	_dmatx.clearInterrupt();
 	_dmatx.clearComplete();
+#endif
 	asm("dsb");
 
 #else
@@ -413,9 +444,9 @@ void HX8357_t3n::updateScreen(void)					// call to say update the screen now.
 #ifdef DEBUG_ASYNC_UPDATE
 void dumpDMA_TCD(DMABaseClass *dmabc)
 {
-	Serial4.printf("%x %x:", (uint32_t)dmabc, (uint32_t)dmabc->TCD);
+	Serial.printf("%x %x:", (uint32_t)dmabc, (uint32_t)dmabc->TCD);
 
-	Serial4.printf("SA:%x SO:%d AT:%x NB:%x SL:%d DA:%x DO: %d CI:%x DL:%x CS:%x BI:%x\n", (uint32_t)dmabc->TCD->SADDR,
+	Serial.printf("SA:%x SO:%d AT:%x NB:%x SL:%d DA:%x DO: %d CI:%x DL:%x CS:%x BI:%x\n", (uint32_t)dmabc->TCD->SADDR,
 		dmabc->TCD->SOFF, dmabc->TCD->ATTR, dmabc->TCD->NBYTES, dmabc->TCD->SLAST, (uint32_t)dmabc->TCD->DADDR, 
 		dmabc->TCD->DOFF, dmabc->TCD->CITER, dmabc->TCD->DLASTSGA, dmabc->TCD->CSR, dmabc->TCD->BITER);
 }
@@ -474,6 +505,36 @@ void	HX8357_t3n::initDMASettings(void)
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
 	// See if moving the frame buffer to other memory that is not cached helps out
 	// to remove tearing and the like...I know with 256 it will be either 256 or 248...
+	#if defined(TRY_FULL_DMA_CHAIN)
+
+	// 320*480/5 = 30720
+	_dmasettings[0].sourceBuffer(_pfbtft, (COUNT_WORDS_WRITE)*2);
+	_dmasettings[0].destination(_pimxrt_spi->TDR);
+	_dmasettings[0].TCD->ATTR_DST = 1;
+	_dmasettings[0].replaceSettingsOnCompletion(_dmasettings[1]);
+
+	_dmasettings[1].sourceBuffer(&_pfbtft[COUNT_WORDS_WRITE], COUNT_WORDS_WRITE*2);
+	_dmasettings[1].destination(_pimxrt_spi->TDR);
+	_dmasettings[1].TCD->ATTR_DST = 1;
+	_dmasettings[1].replaceSettingsOnCompletion(_dmasettings[2]);
+
+	_dmasettings[2].sourceBuffer(&_pfbtft[COUNT_WORDS_WRITE*2], COUNT_WORDS_WRITE*2);
+	_dmasettings[2].destination(_pimxrt_spi->TDR);
+	_dmasettings[2].TCD->ATTR_DST = 1;
+	_dmasettings[2].replaceSettingsOnCompletion(_dmasettings[3]);
+
+	_dmasettings[3].sourceBuffer(&_pfbtft[COUNT_WORDS_WRITE*3], COUNT_WORDS_WRITE*2);
+	_dmasettings[3].destination(_pimxrt_spi->TDR);
+	_dmasettings[3].TCD->ATTR_DST = 1;
+	_dmasettings[3].replaceSettingsOnCompletion(_dmasettings[4]);
+
+	_dmasettings[4].sourceBuffer(&_pfbtft[COUNT_WORDS_WRITE*4], COUNT_WORDS_WRITE*2);
+	_dmasettings[4].destination(_pimxrt_spi->TDR);
+	_dmasettings[4].TCD->ATTR_DST = 1;
+	_dmasettings[4].replaceSettingsOnCompletion(_dmasettings[4]);
+	_dmasettings[4].interruptAtCompletion();
+
+	#else
 	_dma_buffer_size = DMA_BUFFER_SIZE;
 	_dma_cnt_sub_frames_per_frame = (_count_pixels) / _dma_buffer_size;
 	while ((_dma_cnt_sub_frames_per_frame * _dma_buffer_size) != (_count_pixels)) {
@@ -494,7 +555,7 @@ void	HX8357_t3n::initDMASettings(void)
 	_dmasettings[1].TCD->ATTR_DST = 1;
 	_dmasettings[1].replaceSettingsOnCompletion(_dmasettings[0]);
 	_dmasettings[1].interruptAtCompletion();
-
+	#endif
 	// Setup DMA main object
 	//Serial.println("Setup _dmatx");
 	// Serial.println("DMA initDMASettings - before dmatx");
@@ -557,6 +618,11 @@ void HX8357_t3n::dumpDMASettings() {
 	dumpDMA_TCD(&_dmatx);
 	dumpDMA_TCD(&_dmasettings[0]);
 	dumpDMA_TCD(&_dmasettings[1]);
+	#if defined(TRY_FULL_DMA_CHAIN)
+	dumpDMA_TCD(&_dmasettings[2]);
+	dumpDMA_TCD(&_dmasettings[3]);
+	dumpDMA_TCD(&_dmasettings[4]);
+	#endif
 #else
 	Serial.printf("DMA dump TX:%d RX:%d\n", _dmatx.channel, _dmarx.channel);
 	dumpDMA_TCD(&_dmatx);
@@ -649,6 +715,50 @@ bool HX8357_t3n::updateScreenAsync(bool update_cont)					// call to say update t
 	// T4
 	//==========================================
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
+	#if defined(TRY_FULL_DMA_CHAIN)
+	/////////////////////////////
+	// BUGBUG try first not worry about continueous or not.
+  	// Start off remove disable on completion from both...
+	// it will be the ISR that disables it... 
+	if ((uint32_t)_pfbtft >= 0x20200000u)  arm_dcache_flush(_pfbtft, CBALLOC);
+
+	_dmasettings[4].TCD->CSR &= ~( DMA_TCD_CSR_DREQ);
+	beginSPITransaction(_SPI_CLOCK);
+	// Doing full window. 
+	setAddr(0, 0, _width-1, _height-1);
+	writecommand_last(HX8357_RAMWR);
+
+	// Update TCR to 16 bit mode. and output the first entry.
+	_spi_fcr_save = _pimxrt_spi->FCR;	// remember the FCR
+	_pimxrt_spi->FCR = 0;	// clear water marks... 	
+	maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_RXMSK /*| LPSPI_TCR_CONT*/);
+ 	_pimxrt_spi->DER = LPSPI_DER_TDDE;
+	_pimxrt_spi->SR = 0x3f00;	// clear out all of the other status...
+
+  	_dmatx.triggerAtHardwareEvent( _spi_hardware->tx_dma_channel );
+
+ 	_dmatx = _dmasettings[0];
+
+  	_dmatx.begin(false);
+  	_dmatx.enable();
+
+#ifdef DEBUG_ASYNC_UPDATE
+	dumpDMASettings();
+#endif
+
+	_dma_frame_count = 0;  // Set frame count back to zero. 
+	_dmaActiveDisplay[_spi_num]  = this;
+	if (update_cont) {
+		_dma_state |= HX8357_DMA_CONT;
+	} else {
+		_dmasettings[4].disableOnCompletion();
+		_dma_state &= ~HX8357_DMA_CONT;
+	}
+
+	_dma_state |= HX8357_DMA_ACTIVE;
+
+	////////////////////////////
+	#else
   	// Start off remove disable on completion from both...
 	// it will be the ISR that disables it... 
 	_dmasettings[0].TCD->CSR &= ~( DMA_TCD_CSR_DREQ);
@@ -693,6 +803,7 @@ bool HX8357_t3n::updateScreenAsync(bool update_cont)					// call to say update t
 	}
 
 	_dma_state |= HX8357_DMA_ACTIVE;
+	#endif
 #else
 	//==========================================
 	// T3.5
