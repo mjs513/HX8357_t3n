@@ -168,6 +168,7 @@ void HX8357_t3n::process_dma_interrupt(void) {
 		// Serial.printf("Output NOP (SR %x CR %x FSR %x FCR %x %x TCR:%x)\n", _pimxrt_spi->SR, _pimxrt_spi->CR, _pimxrt_spi->FSR, 
 		//	_pimxrt_spi->FCR, _spi_fcr_save, _pimxrt_spi->TCR);
 		writecommand_last(HX8357_NOP);
+		endSPITransaction();
 		_dma_state &= ~HX8357_DMA_ACTIVE;
 		_dmaActiveDisplay[_spi_num]  = 0;	// We don't have a display active any more... 
 	}
@@ -875,9 +876,9 @@ void HX8357_t3n::endUpdateAsync() {
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_dma_state & HX8357_DMA_CONT) {
 		_dma_state &= ~HX8357_DMA_CONT; // Turn of the continueous mode
-#if defined(__MK66FX1M0__) 
-		_dmasettings[3].disableOnCompletion();
-#endif
+		#if defined(TRY_FULL_DMA_CHAIN)
+		_dmasettings[4].disableOnCompletion();
+		#endif	
 	}
 	#endif
 }
