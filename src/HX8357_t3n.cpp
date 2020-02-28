@@ -53,9 +53,9 @@
 //#define DEBUG_ASYNC_UPDATE  // Enable to print out dma info
 //#define DEBUG_ASYNC_LEDS	// Enable to use digitalWrites to Debug
 #ifdef DEBUG_ASYNC_LEDS
-#define DEBUG_PIN_1 0
-#define DEBUG_PIN_2 1
-#define DEBUG_PIN_3 4
+#define DEBUG_PIN_1 4
+#define DEBUG_PIN_2 5
+#define DEBUG_PIN_3 6
 #endif
 
 #ifdef ENABLE_HX8357_FRAMEBUFFER
@@ -145,7 +145,10 @@ void HX8357_t3n::process_dma_interrupt(void) {
 	#if defined(TRY_FULL_DMA_CHAIN)
 	_dma_frame_count++;
 	_dmatx.clearInterrupt();
-
+	//Serial.print(".");
+	#ifdef DEBUG_ASYNC_LEDS
+		digitalWriteFast(DEBUG_PIN_3, HIGH);
+	#endif
 	// See if we are in continuous mode or not..
 	if ((_dma_state & HX8357_DMA_CONT) == 0) {
 		// We are in single refresh mode or the user has called cancel so
@@ -171,7 +174,13 @@ void HX8357_t3n::process_dma_interrupt(void) {
 		endSPITransaction();
 		_dma_state &= ~HX8357_DMA_ACTIVE;
 		_dmaActiveDisplay[_spi_num]  = 0;	// We don't have a display active any more... 
+	} else {
+		// Lets try to flush out memory
+		if ((uint32_t)_pfbtft >= 0x20200000u)  arm_dcache_flush(_pfbtft, CBALLOC);
 	}
+	#ifdef DEBUG_ASYNC_LEDS
+		digitalWriteFast(DEBUG_PIN_3, LOW);
+	#endif
 	#else
 	bool still_more_dma = true;
 	_dma_sub_frame_count++;
@@ -353,9 +362,12 @@ void HX8357_t3n::setFrameBuffer(uint16_t *frame_buffer)
 {
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	_pfbtft = frame_buffer;
+	/*  // Maybe you don't want the memory cleared as you may be playing games wiht multiple buffers. 
 	if (_pfbtft != NULL) {
 		memset(_pfbtft, 0, HX8357_TFTHEIGHT*HX8357_TFTWIDTH*2);
 	}
+	*/
+	_dma_state &= ~HX8357_DMA_INIT; // clear that we init the dma chain as our buffer has changed... 
 
 	#endif	
 }
@@ -459,7 +471,7 @@ void dumpDMA_TCD(DMABaseClass *dmabc)
 void	HX8357_t3n::initDMASettings(void) 
 {
 	// Serial4.printf("initDMASettings called %d\n", _dma_state);
-	if (_dma_state) {  // should test for init, but...
+	if (_dma_state & HX8357_DMA_INIT) {  // should test for init, but...
 		return;	// we already init this. 
 	}
 
@@ -532,7 +544,7 @@ void	HX8357_t3n::initDMASettings(void)
 	_dmasettings[4].sourceBuffer(&_pfbtft[COUNT_WORDS_WRITE*4], COUNT_WORDS_WRITE*2);
 	_dmasettings[4].destination(_pimxrt_spi->TDR);
 	_dmasettings[4].TCD->ATTR_DST = 1;
-	_dmasettings[4].replaceSettingsOnCompletion(_dmasettings[4]);
+	_dmasettings[4].replaceSettingsOnCompletion(_dmasettings[0]);
 	_dmasettings[4].interruptAtCompletion();
 
 	#else
@@ -878,6 +890,7 @@ void HX8357_t3n::endUpdateAsync() {
 		_dma_state &= ~HX8357_DMA_CONT; // Turn of the continueous mode
 		#if defined(TRY_FULL_DMA_CHAIN)
 		_dmasettings[4].disableOnCompletion();
+		//Serial.println(">>> disable on completion set");
 		#endif	
 	}
 	#endif
