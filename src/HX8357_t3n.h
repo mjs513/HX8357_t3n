@@ -73,7 +73,9 @@
 //#define SCREEN_DMA_NUM_SETTINGS (((uint32_t)((2 * ILI9341_TFTHEIGHT * ILI9341_TFTWIDTH) / 65536UL))+1)
 #define SCREEN_DMA_NUM_SETTINGS 3 // see if making it a constant value makes difference...
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)
+#define SCREEN_DMA_NUM_SETTINGS 5 // see if making it a constant value makes difference...
 #define ENABLE_HX8357_FRAMEBUFFER
+#define TRY_FULL_DMA_CHAIN
 #endif
 #endif
 
@@ -560,6 +562,8 @@ class HX8357_t3n : public Print
     volatile uint32_t *_csport;
     uint32_t _spi_tcr_current;
     uint32_t _dcpinmask;
+    uint32_t _tcr_dc_assert;
+    uint32_t _tcr_dc_not_assert;
     volatile uint32_t *_dcport;
 #else
     uint8_t _cspinmask;
@@ -593,15 +597,21 @@ class HX8357_t3n : public Print
 
 	static const uint32_t _count_pixels = HX8357_TFTWIDTH * HX8357_TFTHEIGHT;
 
+	#if defined(TRY_FULL_DMA_CHAIN)
+	DMASetting   		_dmasettings[6];
+	#else
+		
 	DMASetting   		_dmasettings[2];
-	DMAChannel   		_dmatx;
-	volatile    uint32_t _dma_pixel_index = 0;
-	volatile uint16_t 	_dma_sub_frame_count = 0; // Can return a frame count...
-	uint16_t          	_dma_buffer_size;   // the actual size we are using <= DMA_BUFFER_SIZE;
 	uint16_t          	_dma_cnt_sub_frames_per_frame;  
 	static const uint16_t    DMA_BUFFER_SIZE = 960;
 	uint16_t          	_dma_buffer1[DMA_BUFFER_SIZE] __attribute__ ((aligned(4)));
 	uint16_t          	_dma_buffer2[DMA_BUFFER_SIZE] __attribute__ ((aligned(4)));
+	#endif
+
+	DMAChannel   		_dmatx;
+	volatile    uint32_t _dma_pixel_index = 0;
+	volatile uint16_t 	_dma_sub_frame_count = 0; // Can return a frame count...
+	uint16_t          	_dma_buffer_size;   // the actual size we are using <= DMA_BUFFER_SIZE;
 	uint32_t 				_spi_fcr_save;		// save away previous FCR register value
 	static void dmaInterrupt1(void);
 	static void dmaInterrupt2(void);
@@ -642,6 +652,9 @@ class HX8357_t3n : public Print
 
 	void beginSPITransaction(uint32_t clock) __attribute__((always_inline)) {
 		_pspi->beginTransaction(SPISettings(clock, MSBFIRST, SPI_MODE0));
+		#if defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x 
+		if (!_dcport) _spi_tcr_current = _pimxrt_spi->TCR; 	// Only if DC is on hardware CS 
+		#endif
 		if (_csport) {
 #if defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x 
 			DIRECT_WRITE_LOW(_csport, _cspinmask);
@@ -711,39 +724,39 @@ class HX8357_t3n : public Print
 
 	// BUGBUG:: currently assumming we only have CS_0 as valid CS
 	void writecommand_cont(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7) /*| LPSPI_TCR_CONT*/);
+		maybeUpdateTCR(_tcr_dc_assert | LPSPI_TCR_FRAMESZ(7) /*| LPSPI_TCR_CONT*/);
 		_pimxrt_spi->TDR = c;
 		pending_rx_count++;	//
 		waitFifoNotFull();
 	}
 	void writedata8_cont(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7) | LPSPI_TCR_CONT);
 		_pimxrt_spi->TDR = c;
 		pending_rx_count++;	//
 		waitFifoNotFull();
 	}
 	void writedata16_cont(uint16_t d) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_CONT);
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(15) | LPSPI_TCR_CONT);
 		_pimxrt_spi->TDR = d;
 		pending_rx_count++;	//
 		waitFifoNotFull();
 	}
 	void writecommand_last(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(0) | LPSPI_TCR_FRAMESZ(7));
+		maybeUpdateTCR(_tcr_dc_assert | LPSPI_TCR_FRAMESZ(7));
 		_pimxrt_spi->TDR = c;
 //		_pimxrt_spi->SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
 		pending_rx_count++;	//
 		waitTransmitComplete();
 	}
 	void writedata8_last(uint8_t c) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(7));
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(7));
 		_pimxrt_spi->TDR = c;
 //		_pimxrt_spi->SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
 		pending_rx_count++;	//
 		waitTransmitComplete();
 	}
 	void writedata16_last(uint16_t d) __attribute__((always_inline)) {
-		maybeUpdateTCR(LPSPI_TCR_PCS(1) | LPSPI_TCR_FRAMESZ(15));
+		maybeUpdateTCR(_tcr_dc_not_assert | LPSPI_TCR_FRAMESZ(15));
 		_pimxrt_spi->TDR = d;
 //		_pimxrt_spi->SR = LPSPI_SR_WCF | LPSPI_SR_FCF | LPSPI_SR_TCF;
 		pending_rx_count++;	//
@@ -971,6 +984,10 @@ class HX8357_t3n : public Print
 // Warning the implemention of class needs to be here, else the code
 // compiled in the c++ file will cause duplicate defines in the link phase. 
 //#ifndef _ADAFRUIT_GFX_H
+// Last one wins if you hae multiple. 
+#ifdef Adafruit_GFX_Button
+#undef Adafruit_GFX_Button
+#endif
 #define Adafruit_GFX_Button HX8357_Button
 class HX8357_Button {
 public:
