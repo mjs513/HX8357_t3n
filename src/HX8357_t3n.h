@@ -974,8 +974,8 @@ class HX8357_t3n : public Print
 
 };
 
-#ifndef swap
-#define swap(a, b) { typeof(a) t = a; a = b; b = t; }
+#ifndef hx8357_swap
+#define hx8357_swap(a, b) { typeof(a) t = a; a = b; b = t; }
 #endif
 
 // To avoid conflict when also using Adafruit_GFX or any Adafruit library
