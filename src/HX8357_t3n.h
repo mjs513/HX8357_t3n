@@ -629,14 +629,27 @@ class HX8357_t3n : public Print
   void charBounds(char c, int16_t *x, int16_t *y,
       			int16_t *minx, int16_t *miny, int16_t *maxx, int16_t *maxy);
 
+ 	uint16_t _previous_addr_x0 = 0xffff; 
+ 	uint16_t _previous_addr_x1 = 0xffff; 
+ 	uint16_t _previous_addr_y0 = 0xffff; 
+ 	uint16_t _previous_addr_y1 = 0xffff; 
+
 	void setAddr(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 	  __attribute__((always_inline)) {
-		writecommand_cont(HX8357_CASET); // Column addr set
-		writedata16_cont(x0);   // XSTART
-		writedata16_cont(x1);   // XEND
-		writecommand_cont(HX8357_PASET); // Row addr set
-		writedata16_cont(y0);   // YSTART
-		writedata16_cont(y1);   // YEND
+	  	if ((x0 != _previous_addr_x0) || (x1 != _previous_addr_x1)) {
+			writecommand_cont(HX8357_CASET); // Column addr set
+			writedata16_cont(x0);   // XSTART
+			writedata16_cont(x1);   // XEND	
+			_previous_addr_x0 = x0;
+			_previous_addr_x1 = x1;
+	  	}
+	  	if ((y0 != _previous_addr_y0) || (y1 != _previous_addr_y1)) {
+			writecommand_cont(HX8357_PASET); // Row addr set
+			writedata16_cont(y0);   // YSTART
+			writedata16_cont(y1);   // YEND
+			_previous_addr_y0 = y0;
+			_previous_addr_y1 = y1;
+		}
 	}
 //. From Onewire utility files
 #if defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x
