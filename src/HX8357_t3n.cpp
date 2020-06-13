@@ -387,6 +387,7 @@ uint8_t HX8357_t3n::useFrameBuffer(boolean b)		// use the frame buffer?  First c
 			memset(_pfbtft, 0, CBALLOC);	
 		}
 		_use_fbtft = 1;
+		clearChangedRange();	// make sure the dirty range is updated.
 	} else 
 		_use_fbtft = 0;
 
@@ -414,7 +415,7 @@ void HX8357_t3n::updateScreen(void)					// call to say update the screen now.
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
 		beginSPITransaction(_SPI_CLOCK);
-		if (_standard) {
+		if (_standard && !_updateChangedAreasOnly) {
 			// Doing full window. 
 			setAddr(0, 0, _width-1, _height-1);
 			writecommand_cont(HX8357_RAMWR);
@@ -430,27 +431,44 @@ void HX8357_t3n::updateScreen(void)					// call to say update the screen now.
 			}
 			writedata16_last(*pftbft);
 		} else {
-			// setup just to output the clip rectangle area. 
-			setAddr(_displayclipx1, _displayclipy1, _displayclipx2-1, _displayclipy2-1);
-			writecommand_cont(HX8357_RAMWR);
+			// setup just to output the clip rectangle area anded with updated area if enabled
+			int16_t start_x = _displayclipx1;
+			int16_t start_y = _displayclipy1;
+			int16_t end_x = _displayclipx2 - 1; 
+			int16_t end_y = _displayclipy2 - 1;
 
-			// BUGBUG doing as one shot.  Not sure if should or not or do like
-			// main code and break up into transactions...
-			uint16_t * pfbPixel_row = &_pfbtft[ _displayclipy1*_width + _displayclipx1];
-			for (uint16_t y = _displayclipy1; y < _displayclipy2; y++) {
-				uint16_t * pfbPixel = pfbPixel_row;
-				for (uint16_t x = _displayclipx1; x < (_displayclipx2-1); x++) {
-					writedata16_cont(*pfbPixel++);
+			if (_updateChangedAreasOnly) {
+				// maybe update range of values to update...
+	 			if (_changed_min_x > start_x) start_x = _changed_min_x;
+	 			if (_changed_min_y > start_y) start_y = _changed_min_y;
+	 			if (_changed_max_x < end_x) end_x = _changed_max_x;
+	 			if (_changed_max_y < end_y) end_y = _changed_max_y;
+			}
+
+			// Only do if actual area to update
+			if ((start_x <= end_x) && (start_y <= end_y)) {
+				setAddr(start_x, start_y, end_x, end_y);
+				writecommand_cont(HX8357_RAMWR);
+
+				// BUGBUG doing as one shot.  Not sure if should or not or do like
+				// main code and break up into transactions...
+				uint16_t * pfbPixel_row = &_pfbtft[ start_y*_width + start_x];
+				for (uint16_t y = start_y; y <= end_y; y++) {
+					uint16_t * pfbPixel = pfbPixel_row;
+					for (uint16_t x = start_x; x < end_x; x++) {
+						writedata16_cont(*pfbPixel++);
+					}
+					if (y < (end_y))
+						writedata16_cont(*pfbPixel);
+					else	
+						writedata16_last(*pfbPixel);
+					pfbPixel_row += _width;	// setup for the next row. 
 				}
-				if (y < (_displayclipy2-1))
-					writedata16_cont(*pfbPixel);
-				else	
-					writedata16_last(*pfbPixel);
-				pfbPixel_row += _width;	// setup for the next row. 
 			}
 		}
 		endSPITransaction();
 	}
+	clearChangedRange();	// make sure the dirty range is updated.	
 	#endif
 }			 
 
@@ -937,6 +955,7 @@ void HX8357_t3n::drawPixel(int16_t x, int16_t y, uint16_t color) {
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y);		// update the range of the screen that has been changed;
 		_pfbtft[y*_width + x] = color;
 
 	} else 
@@ -962,6 +981,7 @@ void HX8357_t3n::drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, 1, h);		// update the range of the screen that has been changed;
 		uint16_t * pfbPixel = &_pfbtft[ y*_width + x];
 		while (h--) {
 			*pfbPixel = color;
@@ -994,6 +1014,7 @@ void HX8357_t3n::drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, 1);		// update the range of the screen that has been changed;
 		if ((x&1) || (w&1)) {
 			uint16_t * pfbPixel = &_pfbtft[ y*_width + x];
 			while (w--) {
@@ -1027,6 +1048,7 @@ void HX8357_t3n::fillScreen(uint16_t color)
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft && _standard) {
 		// Speed up lifted from Franks DMA code... _standard is if no offsets and rects..
+		updateChangedRange(0, 0, _width, _height);		// update the range of the screen that has been changed;
 		uint32_t color32 = (color << 16) | color;
 
 		uint32_t *pfbPixel = (uint32_t *)_pfbtft;
@@ -1065,6 +1087,7 @@ void HX8357_t3n::fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
 		if ((x&1) || (w&1)) {
 			uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 			for (;h>0; h--) {
@@ -1134,6 +1157,7 @@ void HX8357_t3n::fillRectVGradient(int16_t x, int16_t y, int16_t w, int16_t h, u
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
 		if ((x&1) || (w&1)) {
 			uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 			for (;h>0; h--) {
@@ -1204,6 +1228,7 @@ void HX8357_t3n::fillRectHGradient(int16_t x, int16_t y, int16_t w, int16_t h, u
 	r=r1;g=g1;b=b1;	
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
 		uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 		for (;h>0; h--) {
 			uint16_t * pfbPixel = pfbPixel_row;
@@ -1260,27 +1285,27 @@ void HX8357_t3n::fillScreenHGradient(uint16_t color1, uint16_t color2)
 
 void HX8357_t3n::setRotation(uint8_t m)
 {
-	rotation = m % 4; // can't be higher than 3
+	rotation = m & 3; // can't be higher than 3
 	beginSPITransaction(_SPI_CLOCK);
 	writecommand_cont(HX8357_MADCTL);
 	switch (rotation) {
 	case 0:
-		writedata8_last(MADCTL_MX | MADCTL_BGR);
+		writedata8_last(MADCTL_MX | MADCTL_MY | MADCTL_RGB);
 		_width  = HX8357_TFTWIDTH;
 		_height = HX8357_TFTHEIGHT;
 		break;
 	case 1:
-		writedata8_last(MADCTL_MV | MADCTL_BGR);
+		writedata8_last(MADCTL_MV | MADCTL_MY | MADCTL_RGB);
 		_width  = HX8357_TFTHEIGHT;
 		_height = HX8357_TFTWIDTH;
 		break;
 	case 2:
-		writedata8_last(MADCTL_MY | MADCTL_BGR);
+		writedata8_last(MADCTL_RGB);
 		_width  = HX8357_TFTWIDTH;
 		_height = HX8357_TFTHEIGHT;
 		break;
 	case 3:
-		writedata8_last(MADCTL_MX | MADCTL_MY | MADCTL_MV | MADCTL_BGR);
+		writedata8_last(MADCTL_MX | MADCTL_MV | MADCTL_RGB);
 		_width  = HX8357_TFTHEIGHT;
 		_height = HX8357_TFTWIDTH;
 		break;
@@ -1829,6 +1854,7 @@ void HX8357_t3n::writeRect(int16_t x, int16_t y, int16_t w, int16_t h, const uin
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
 		uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 		for (;h>0; h--) {
 			uint16_t * pfbPixel = pfbPixel_row;
@@ -1901,6 +1927,7 @@ void HX8357_t3n::writeRect8BPP(int16_t x, int16_t y, int16_t w, int16_t h, const
 	//Serial.printf("WR8C: %d %d %d %d %x- %d %d\n", x, y, w, h, (uint32_t)pixels, x_clip_right, x_clip_left);
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
 		uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 		for (;h>0; h--) {
 			pixels += x_clip_left;
@@ -2018,6 +2045,7 @@ void HX8357_t3n::writeRectNBPP(int16_t x, int16_t y, int16_t w, int16_t h,  uint
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
+		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
 		uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 		for (;h>0; h--) {
 			uint16_t * pfbPixel = pfbPixel_row;
@@ -2065,11 +2093,9 @@ void HX8357_t3n::writeRectNBPP(int16_t x, int16_t y, int16_t w, int16_t h,  uint
 
 static const uint8_t init_commands[] = {
 	1, HX8357_SWRESET,
-	1, HX8357_SLPOUT, // exit sleep
-    1, HX8357_DISPON, // display on
-    1, HX8357_DISPOFF, // display off
-    1, HX8357_DISPON, // display oN
+	0x80, 100/5,		// delay 100ms
 	4, HX8357D_SETC, 0xFF, 0x83, 0x57,
+	0x80, 500/5,		// delay 500ms
 	5, HX8357_SETRGB, 0x80, 0x00, 0X06, 0X06, // enable SDO pin
 	2, HX8357D_SETCOM, 0x25, 			   // -1.52V
 	2, HX8357_SETOSC, 0x68,				   // Normal mode 70Hz, Idle mode 55 Hz
@@ -2086,7 +2112,11 @@ static const uint8_t init_commands[] = {
 	2, HX8357_MADCTL, 0xC0, // Memory Access Control
 	2, HX8357_TEON, 0x00,
 	3, HX8357_TEARLINE, 0x00, 0x02,
-	0
+	1, HX8357_SLPOUT,
+    0x80, 150 / 5, // Exit Sleep, then delay 150 ms
+    1, HX8357_DISPON,
+    0x80, 50 / 5, // Main screen turn on, delay 50 ms
+        0,             // END OF COMMAND LIST
 };
 
   
@@ -2243,20 +2273,17 @@ void HX8357_t3n::begin(uint32_t spi_clock, uint32_t spi_clock_read)
 	const uint8_t *addr = init_commands;
 	while (1) {
 		uint8_t count = *addr++;
-		if (count-- == 0) break;
-		writecommand_cont(*addr++);
-		while (count-- > 0) {
-			writedata8_cont(*addr++);
+		if (count == 0x80) {	// delay command
+			delay(*addr++ * 5);
+		} else {
+			if (count-- == 0) break;
+			writecommand_cont(*addr++);
+			while (count-- > 0) {
+				writedata8_cont(*addr++);
+			}
 		}
 	}
 	
-    //HX8357_SLPOUT, 0x80 + 120/5, // Exit sleep, then delay 120 ms
-    //HX8357_DISPON, 0x80 +  10/5, // Main screen turn on, delay 10 ms
-	writecommand_last(HX8357_SLPOUT);    // Exit Sleep
-	endSPITransaction();
-	delay(120); 		
-	beginSPITransaction(_SPI_CLOCK);
-	writecommand_last(HX8357_DISPON);    // Display on
 	endSPITransaction();
 	delay(20);
 
@@ -2864,7 +2891,7 @@ void HX8357_t3n::drawChar(int16_t x, int16_t y, unsigned char c,
 
 		#ifdef ENABLE_HX8357_FRAMEBUFFER
 		if (_use_fbtft) {
-
+			updateChangedRange(x, y, 6 * size_x , 8 * size_y);		// update the range of the screen that has been changed;
 			uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
 			for (yc=0; (yc < 8) && (y < _displayclipy2); yc++) {
 				for (yr=0; (yr < size_y) && (y < _displayclipy2); yr++) {
@@ -3278,6 +3305,8 @@ void HX8357_t3n::drawFontChar(unsigned int c)
 */
 		#ifdef ENABLE_HX8357_FRAMEBUFFER
 		if (_use_fbtft) {
+			updateChangedRange(start_x, start_y);		// update the range of the screen that has been changed;
+			updateChangedRange(end_x, end_y);		// update the range of the screen that has been changed;
 			uint16_t * pfbPixel_row = &_pfbtft[ start_y*_width + start_x];
 			uint16_t * pfbPixel;
 			int screen_y = start_y;
@@ -4003,6 +4032,8 @@ void HX8357_t3n::drawGFXFontChar(unsigned int c) {
 		#ifdef ENABLE_HX8357_FRAMEBUFFER
 		if (_use_fbtft) {
 			// lets try to output the values directly...
+			updateChangedRange(x_start, y_start);		// update the range of the screen that has been changed;
+			updateChangedRange(x_end, y_end);		// update the range of the screen that has been changed;
 			uint16_t * pfbPixel_row = &_pfbtft[ y_start *_width + x_start];
 			uint16_t * pfbPixel;
 			// First lets fill in the top parts above the actual rectangle...
