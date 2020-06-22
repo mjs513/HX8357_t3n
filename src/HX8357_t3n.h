@@ -196,6 +196,11 @@
 #define sint16_t int16_t
 
 // Lets see about supporting Adafruit fonts as well?
+#if __has_include(<gfxfont.h>)
+	#include <gfxfont.h>
+#endif
+
+// Lets see about supporting Adafruit fonts as well?
 #ifndef _GFXFONT_H_
 #define _GFXFONT_H_
 
