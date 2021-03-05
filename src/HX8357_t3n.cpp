@@ -3582,7 +3582,7 @@ void HX8357_t3n::drawFontChar(unsigned int c)
 }
 
 //strPixelLen			- gets pixel length of given ASCII string
-int16_t HX8357_t3n::strPixelLen(const char * str)
+int16_t HX8357_t3n::strPixelLen(const char * str, uint16_t cb)
 {
 //	//Serial.printf("strPixelLen %s\n", str);
 	if (!str) return(0);
@@ -3591,12 +3591,12 @@ int16_t HX8357_t3n::strPixelLen(const char * str)
 		// BUGBUG:: just use the other function for now... May do this for all of them...
 	  int16_t x, y;
 	  uint16_t w, h;
-	  getTextBounds(str, cursor_x, cursor_y, &x, &y, &w, &h);
-	  return w;
+	  if (cb == 0xffff) getTextBounds(str, cursor_x, cursor_y, &x, &y, &w, &h);  // default no count passed in
+	  else getTextBounds((const uint8_t *)str, cb, cursor_x, cursor_y, &x, &y, &w, &h);	  return w;
 	}
 
 	uint16_t len=0, maxlen=0;
-	while (*str)
+	while (*str && cb)
 	{
 		if (*str=='\n')
 		{
@@ -4431,15 +4431,16 @@ int16_t HX8357_t3n::drawString(const String& string, int poX, int poY)
   int16_t len = string.length() + 2;
   char buffer[len];
   string.toCharArray(buffer, len);
-  return drawString1(buffer, len, poX, poY);
+  return drawString(buffer, len-2, poX, poY);
 }
 
-int16_t HX8357_t3n::drawString1(char string[], int16_t len, int poX, int poY)
+int16_t HX8357_t3n::drawString(const char string[], int16_t len, int poX, int poY)
 {
   int16_t sumX = 0;
   uint8_t padding = 1/*, baseline = 0*/;
   
-  uint16_t cwidth = strPixelLen(string); // Find the pixel width of the string in the font
+  uint16_t cwidth =
+      strPixelLen(string, len); // Find the pixel width of the string in the font
   uint16_t cheight = textsize_y*6;
 
   
@@ -4506,13 +4507,13 @@ int16_t HX8357_t3n::drawString1(char string[], int16_t len, int poX, int poY)
     //if (poY+cheight-baseline >_height) poY = _height - cheight;
   }
   if(font == NULL){
-	  for(uint8_t i = 0; i < len-2; i++){
+	  for(uint8_t i = 0; i < len; i++){
 		drawChar((int16_t) (poX+sumX), (int16_t) poY, string[i], textcolor, textbgcolor, textsize_x, textsize_y);
 		sumX += cwidth/(len-2) + padding;
 	  }
   } else {
 	  setCursor(poX, poY);
-	  for(uint8_t i = 0; i < len-2; i++){
+	  for(uint8_t i = 0; i < len; i++){
 		drawFontChar(string[i]);
 		setCursor(cursor_x, cursor_y);
 	  }
