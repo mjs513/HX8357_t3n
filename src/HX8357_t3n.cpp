@@ -3591,8 +3591,12 @@ int16_t HX8357_t3n::strPixelLen(const char * str, uint16_t cb)
 		// BUGBUG:: just use the other function for now... May do this for all of them...
 	  int16_t x, y;
 	  uint16_t w, h;
-	  if (cb == 0xffff) getTextBounds(str, cursor_x, cursor_y, &x, &y, &w, &h);  // default no count passed in
-	  else getTextBounds((const uint8_t *)str, cb, cursor_x, cursor_y, &x, &y, &w, &h);	  return w;
+	  if (cb == 0xffff) {
+	    getTextBounds(str, cursor_x, cursor_y, &x, &y, &w, &h);  // default no count passed in
+	  } else {
+		getTextBounds((const uint8_t *)str, cb, cursor_x, cursor_y, &x, &y, &w, &h);
+		return w;
+	  }
 	}
 
 	uint16_t len=0, maxlen=0;

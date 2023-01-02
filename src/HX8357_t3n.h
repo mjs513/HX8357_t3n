@@ -191,7 +191,9 @@
 #define HX8357_GREENYELLOW 0xAFE5      /* 173, 255,  47 */
 #define HX8357_PINK        0xF81F
 
+#ifndef CL
 #define CL(_r,_g,_b) ((((_r)&0xF8)<<8)|(((_g)&0xFC)<<3)|((_b)>>3))
+#endif
 
 #define sint16_t int16_t
 
@@ -358,7 +360,9 @@ class HX8357_t3n : public Print
 	void drawChar(int16_t x, int16_t y, unsigned char c, uint16_t color, uint16_t bg, uint8_t size_x, uint8_t size_y);
 	void inline drawChar(int16_t x, int16_t y, unsigned char c, uint16_t color, uint16_t bg, uint8_t size) 
 	    { drawChar(x, y, c, color, bg, size);}
+	#ifndef CENTER
 	static const int16_t CENTER = 9998;
+	#endif
 	void setCursor(int16_t x, int16_t y, bool autoCenter=false);
     void getCursor(int16_t *x, int16_t *y);
 	void setTextColor(uint16_t c);
@@ -722,7 +726,9 @@ class HX8357_t3n : public Print
 		waitTransmitComplete(mcr);
 	}
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)  // Teensy 4.x 
+	#ifndef TCR_MASK
 	#define TCR_MASK  (LPSPI_TCR_PCS(3) | LPSPI_TCR_FRAMESZ(31) | LPSPI_TCR_CONT | LPSPI_TCR_RXMSK )
+	#endif
 	void maybeUpdateTCR(uint32_t requested_tcr_state) /*__attribute__((always_inline)) */ {
 		if ((_spi_tcr_current & TCR_MASK) != requested_tcr_state) {
 			bool dc_state_change = (_spi_tcr_current & LPSPI_TCR_PCS(3)) != (requested_tcr_state & LPSPI_TCR_PCS(3));
