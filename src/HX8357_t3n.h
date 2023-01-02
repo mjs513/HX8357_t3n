@@ -73,7 +73,9 @@
 //#define SCREEN_DMA_NUM_SETTINGS (((uint32_t)((2 * ILI9341_TFTHEIGHT * ILI9341_TFTWIDTH) / 65536UL))+1)
 #define SCREEN_DMA_NUM_SETTINGS 3 // see if making it a constant value makes difference...
 #elif defined(__IMXRT1052__) || defined(__IMXRT1062__)
+#ifndef SCREEN_DMA_NUM_SETTINGS
 #define SCREEN_DMA_NUM_SETTINGS 5 // see if making it a constant value makes difference...
+#endif
 #define ENABLE_HX8357_FRAMEBUFFER
 #define TRY_FULL_DMA_CHAIN
 #endif
