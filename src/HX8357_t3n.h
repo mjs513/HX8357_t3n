@@ -468,6 +468,12 @@ class HX8357_t3n : public Print
 	uint16_t *getFrameBuffer() {return NULL;}
 	boolean	asyncUpdateActive(void)  {return false;}
 	#endif
+	void updateChangedAreasOnly(bool updateChangedOnly) {
+#ifdef ENABLE_HX8357_FRAMEBUFFER
+		_updateChangedAreasOnly = updateChangedOnly;
+#endif
+	}
+
  protected:
 	SPIClass *_pspi = nullptr;
 	SPIClass::SPI_Hardware_t *_spi_hardware;
@@ -909,7 +915,7 @@ class HX8357_t3n : public Print
 	void clearChangedRange() {
 		_changed_min_x = 0x7fff;
 		_changed_max_x = -1;
-		_changed_min_x = 0x7fff;
+		_changed_min_y = 0x7fff;
 		_changed_max_y = -1;
   	}
 
@@ -933,11 +939,6 @@ class HX8357_t3n : public Print
 	}
 	#endif
 
-	void updateChangedAreasOnly(bool updateChangedOnly) {
-#ifdef ENABLE_HX8357_FRAMEBUFFER
-		_updateChangedAreasOnly = updateChangedOnly;
-#endif
-	}
 
 
 

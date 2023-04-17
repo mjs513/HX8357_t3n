@@ -1854,19 +1854,43 @@ void HX8357_t3n::writeRect(int16_t x, int16_t y, int16_t w, int16_t h, const uin
 
 	#ifdef ENABLE_HX8357_FRAMEBUFFER
 	if (_use_fbtft) {
-		updateChangedRange(x, y, w, h);		// update the range of the screen that has been changed;
-		uint16_t * pfbPixel_row = &_pfbtft[ y*_width + x];
-		for (;h>0; h--) {
-			uint16_t * pfbPixel = pfbPixel_row;
-			pcolors += x_clip_left;
-			for (int i = 0 ;i < w; i++) {
-				*pfbPixel++ = *pcolors++;
-			}
-			pfbPixel_row += _width;
-			pcolors += x_clip_right;
+    //updateChangedRange(
+    //    x, y, w, h); // update the range of the screen that has been changed;
+    uint16_t *pfbPixel_row = &_pfbtft[y * _width + x];
+    int16_t y_changed_min = _height;
+    int16_t y_changed_max = -1;
+    int16_t i_changed_min = _width;
+    int16_t i_changed_max = -1;
 
-		}
-		return;	
+    for (; h > 0; h--) {
+      uint16_t *pfbPixel = pfbPixel_row;
+      pcolors += x_clip_left;
+      for (int i = 0; i < w; i++) {
+        if (*pfbPixel != *pcolors) {
+          // pixel changed
+          *pfbPixel = *pcolors;
+          if (y < y_changed_min) y_changed_min = y;
+          if (y > y_changed_max) y_changed_max = y;
+          if (i < i_changed_min) i_changed_min = i;
+          if (i > i_changed_max) i_changed_max = i;
+
+        }
+        pfbPixel++;
+        pcolors++;
+      }
+      pfbPixel_row += _width;
+      pcolors += x_clip_right;
+      y++;
+    }
+    // See if we found any change
+    // if any of the min/max values have default value we know that nothing changed.
+    if (y_changed_max != -1) {
+      updateChangedRange(x + i_changed_min , y_changed_min, 
+        (i_changed_max - i_changed_min) + 1, (y_changed_max - y_changed_min) + 1);
+
+      //if(Serial)Serial.printf("WRECT: %d - %d %d %d %d\n", x, i_changed_min, y_changed_min, i_changed_max, y_changed_max);
+    }
+    return;
 	}
 	#endif
 
